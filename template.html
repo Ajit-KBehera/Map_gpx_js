@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marathon Route Map</title>
+    <style>
+        /* --- CSS VARIABLES & THEME ENGINE --- */
+        :root {
+            --bg-ui: #ffffff;
+            --text-ui: #333333;
+            --shadow: 0 4px 12px rgba(0,0,0,0.15);
+            --border-radius: 8px;
+            --accent: #4285F4;
+        }
+
+        body, html { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        #map { height: 100%; width: 100%; }
+
+        /* --- UI OVERLAY --- */
+        .ui-layer {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+        }
+
+        /* Dropdown Container */
+        .theme-dropdown { position: relative; }
+
+        /* Main Button */
+        .theme-btn {
+            background: var(--bg-ui);
+            color: var(--text-ui);
+            border: none;
+            padding: 12px 16px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: 0.2s;
+        }
+        .theme-btn:hover { transform: translateY(-1px); }
+
+        /* Dropdown Menu */
+        .dropdown-menu {
+            position: absolute;
+            top: 110%;
+            right: 0;
+            background: var(--bg-ui);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            width: 180px;
+            padding: 8px 0;
+            opacity: 0;
+            transform: translateY(-10px);
+            visibility: hidden;
+            transition: all 0.2s ease;
+        }
+
+        .dropdown-menu.active {
+            opacity: 1;
+            transform: translateY(0);
+            visibility: visible;
+        }
+
+        .dropdown-item {
+            padding: 10px 20px;
+            color: var(--text-ui);
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .dropdown-item:hover { background-color: rgba(0,0,0,0.05); }
+        .dropdown-item.selected { color: var(--accent); font-weight: bold; }
+        
+        /* Stats Card (Bonus) */
+        .stats-card {
+            background: var(--bg-ui);
+            padding: 15px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-top: 10px;
+            min-width: 200px;
+        }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 14px; }
+        .stat-label { color: #666; }
+        .stat-val { font-weight: bold; }
+
+    </style>
+</head>
+<body>
+
+    <div class="ui-layer">
+        <!-- Theme Switcher -->
+        <div class="theme-dropdown">
+            <button class="theme-btn" onclick="toggleDropdown()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+                Map Themes
+            </button>
+            <div class="dropdown-menu" id="themeList">
+                <div class="dropdown-item selected" onclick="changeMapStyle('default', this)">
+                    Google Standard
+                </div>
+                <!-- JINJA LOOP FOR STYLES -->
+                {% for style_name in style_names %}
+                <div class="dropdown-item" onclick="changeMapStyle('{{ style_name }}', this)">
+                    {{ style_name|replace('_', ' ')|title }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Info Card -->
+        <div class="stats-card">
+            <div class="stat-row"><span class="stat-label">Distance</span> <span class="stat-val">{{ total_distance_km }} km</span></div>
+            <div class="stat-row"><span class="stat-label">Start Time</span> <span class="stat-val">{{ start_time }}</span></div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        let map;
+        // Injected Data
+        const routeCoords = {{ route_coords | tojson }};
+        const allStyles = {{ all_styles | tojson }};
+        const defaultStyleName = "{{ default_style }}";
+
+        function initMap() {
+            // Determine initial style
+            const initialStyle = allStyles[defaultStyleName] || [];
+
+            // 1. Initialize Map
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: routeCoords.length > 0 ? routeCoords[0] : { lat: 40.7128, lng: -74.0060 },
+                zoom: 12,
+                styles: initialStyle,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: false
+            });
+
+            // 2. Draw Polyline
+            const marathonPath = new google.maps.Polyline({
+                path: routeCoords,
+                geodesic: true,
+                strokeColor: "#FF0040", // Hot pink/Red
+                strokeOpacity: 1.0,
+                strokeWeight: 5,
+            });
+            marathonPath.setMap(map);
+
+            // 3. Fit Bounds
+            const bounds = new google.maps.LatLngBounds();
+            routeCoords.forEach(pt => bounds.extend(pt));
+            map.fitBounds(bounds);
+
+            // 4. Add Start/Finish Markers
+            if (routeCoords.length > 0) {
+                new google.maps.Marker({
+                    position: routeCoords[0],
+                    map: map,
+                    label: "S",
+                    title: "Start"
+                });
+                new google.maps.Marker({
+                    position: routeCoords[routeCoords.length - 1],
+                    map: map,
+                    label: "F",
+                    title: "Finish"
+                });
+            }
+        }
+
+        // --- UI Logic ---
+        const dropdown = document.getElementById('themeList');
+        
+        function toggleDropdown() {
+            dropdown.classList.toggle('active');
+        }
+
+        function changeMapStyle(styleName, element) {
+            // Update Map
+            if (map) {
+                const styleData = (styleName === 'default') ? [] : allStyles[styleName];
+                map.setOptions({ styles: styleData });
+            }
+
+            // Update UI Selection
+            document.querySelectorAll('.dropdown-item').forEach(item => item.classList.remove('selected'));
+            if(element) element.classList.add('selected');
+            
+            // Close menu
+            dropdown.classList.remove('active');
+        }
+
+        // Close on click outside
+        window.onclick = function(event) {
+            if (!event.target.closest('.theme-dropdown')) {
+                dropdown.classList.remove('active');
+            }
+        }
+    </script>
+    <script async src="https://maps.googleapis.com/maps/api/js?key={{ api_key }}&callback=initMap"></script>
+</body>
+</html>
