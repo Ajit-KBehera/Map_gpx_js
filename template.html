@@ -104,6 +104,22 @@
 <body>
 
     <div class="ui-layer">
+        <!-- Route Selector -->
+        <div class="theme-dropdown">
+            <button class="theme-btn" onclick="toggleRouteDropdown()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                Routes
+            </button>
+            <div class="dropdown-menu" id="routeList">
+                <!-- JINJA LOOP FOR ROUTES -->
+                {% for route_name, route_data in all_routes.items() %}
+                <div class="dropdown-item {% if route_name == default_route %}selected{% endif %}" onclick="changeRoute('{{ route_name }}', this)">
+                    {{ route_name|replace('gpx_', '')|replace('_', ' ')|replace('.gpx', '')|title }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
         <!-- Theme Switcher -->
         <div class="theme-dropdown">
             <button class="theme-btn" onclick="toggleDropdown()">
@@ -134,10 +150,16 @@
 
     <script>
         let map;
+        let marathonPath;
+        let startMarker;
+        let finishMarker;
+        
         // Injected Data
         const routeCoords = {{ route_coords | tojson }};
         const allStyles = {{ all_styles | tojson }};
         const defaultStyleName = "{{ default_style }}";
+        const allRoutes = {{ all_routes | tojson }};
+        const defaultRouteName = "{{ default_route }}";
 
         function initMap() {
             // Determine initial style
@@ -154,7 +176,7 @@
             });
 
             // 2. Draw Polyline
-            const marathonPath = new google.maps.Polyline({
+            marathonPath = new google.maps.Polyline({
                 path: routeCoords,
                 geodesic: true,
                 strokeColor: "#FF0040", // Hot pink/Red
@@ -170,13 +192,13 @@
 
             // 4. Add Start/Finish Markers
             if (routeCoords.length > 0) {
-                new google.maps.Marker({
+                startMarker = new google.maps.Marker({
                     position: routeCoords[0],
                     map: map,
                     label: "S",
                     title: "Start"
                 });
-                new google.maps.Marker({
+                finishMarker = new google.maps.Marker({
                     position: routeCoords[routeCoords.length - 1],
                     map: map,
                     label: "F",
@@ -186,10 +208,17 @@
         }
 
         // --- UI Logic ---
-        const dropdown = document.getElementById('themeList');
+        const themeDropdown = document.getElementById('themeList');
+        const routeDropdown = document.getElementById('routeList');
         
         function toggleDropdown() {
-            dropdown.classList.toggle('active');
+            themeDropdown.classList.toggle('active');
+            routeDropdown.classList.remove('active');
+        }
+
+        function toggleRouteDropdown() {
+            routeDropdown.classList.toggle('active');
+            themeDropdown.classList.remove('active');
         }
 
         function changeMapStyle(styleName, element) {
@@ -199,18 +228,83 @@
                 map.setOptions({ styles: styleData });
             }
 
-            // Update UI Selection
-            document.querySelectorAll('.dropdown-item').forEach(item => item.classList.remove('selected'));
+            // Update UI Selection (only in theme dropdown)
+            themeDropdown.querySelectorAll('.dropdown-item').forEach(item => item.classList.remove('selected'));
             if(element) element.classList.add('selected');
             
             // Close menu
-            dropdown.classList.remove('active');
+            themeDropdown.classList.remove('active');
+        }
+
+        function changeRoute(routeName, element) {
+            if (!allRoutes[routeName]) {
+                console.error('Route not found:', routeName);
+                return;
+            }
+
+            const route = allRoutes[routeName];
+            const newCoords = route.coords;
+
+            // Update polyline
+            if (marathonPath) {
+                marathonPath.setPath(newCoords);
+            } else {
+                marathonPath = new google.maps.Polyline({
+                    path: newCoords,
+                    geodesic: true,
+                    strokeColor: "#FF0040",
+                    strokeOpacity: 1.0,
+                    strokeWeight: 5,
+                });
+                marathonPath.setMap(map);
+            }
+
+            // Update markers
+            if (startMarker) startMarker.setMap(null);
+            if (finishMarker) finishMarker.setMap(null);
+
+            if (newCoords.length > 0) {
+                startMarker = new google.maps.Marker({
+                    position: newCoords[0],
+                    map: map,
+                    label: "S",
+                    title: "Start"
+                });
+                finishMarker = new google.maps.Marker({
+                    position: newCoords[newCoords.length - 1],
+                    map: map,
+                    label: "F",
+                    title: "Finish"
+                });
+            }
+
+            // Fit bounds to new route
+            const bounds = new google.maps.LatLngBounds();
+            newCoords.forEach(pt => bounds.extend(pt));
+            map.fitBounds(bounds);
+
+            // Update stats card
+            const statsCard = document.querySelector('.stats-card');
+            if (statsCard) {
+                const distanceEl = statsCard.querySelector('.stat-row:first-child .stat-val');
+                const dateEl = statsCard.querySelector('.stat-row:last-child .stat-val');
+                if (distanceEl) distanceEl.textContent = route.distance + ' km';
+                if (dateEl) dateEl.textContent = route.date;
+            }
+
+            // Update UI Selection (only in route dropdown)
+            routeDropdown.querySelectorAll('.dropdown-item').forEach(item => item.classList.remove('selected'));
+            if(element) element.classList.add('selected');
+            
+            // Close menu
+            routeDropdown.classList.remove('active');
         }
 
         // Close on click outside
         window.onclick = function(event) {
             if (!event.target.closest('.theme-dropdown')) {
-                dropdown.classList.remove('active');
+                themeDropdown.classList.remove('active');
+                routeDropdown.classList.remove('active');
             }
         }
     </script>
